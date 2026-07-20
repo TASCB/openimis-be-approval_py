@@ -38,15 +38,35 @@ DEFAULT_FLOWS = [
         # (segregation of duties) without needing two separate rights.
         'enforce_distinct_approvers': True,
         'steps': [
-            {'code': 'FINANCE_DIRECTOR', 'label': 'Director of Finance', 'required_right': '152303'},
-            {'code': 'EXECUTIVE_DIRECTOR', 'label': 'Executive Director', 'required_right': '152303'},
+            {'code': 'FINANCE_DIRECTOR', 'label': 'Director of Finance', 'required_right': '152303',
+             'assigned_role': 'TASAF Payment Approver'},
+            {'code': 'EXECUTIVE_DIRECTOR', 'label': 'Executive Director', 'required_right': '152303',
+             'assigned_role': 'TASAF Payment Approver'},
         ],
     },
     {
         'code': 'TRAINING_APPROVAL', 'name': 'Training approval',
         'domain': 'training.Training',
         'steps': [
-            {'code': 'SUPERVISOR', 'label': 'Supervisor', 'required_right': '210110'},
+            {'code': 'SUPERVISOR', 'label': 'Supervisor', 'required_right': '210110',
+             'assigned_role': 'TASAF PCT Manager'},
+        ],
+    },
+    {
+        # Beneficiary enrolment approval. Same pattern as PAYMENT_APPROVAL: a single domain right
+        # (enrolment authorisation 170003) with enforce_distinct_approvers separating the signatures
+        # by PERSON, and per-step assigned_role routing each level to its tier. A fuller
+        # ward -> council -> national -> DP chain with tier-exclusive rights is a future refinement
+        # (needs a dedicated per-tier enrolment-approve right in social_protection — see the
+        # role-seed developer guide §7).
+        'code': 'ENROLMENT_APPROVAL', 'name': 'Beneficiary enrolment approval',
+        'domain': 'social_protection.Beneficiary',
+        'enforce_distinct_approvers': True,
+        'steps': [
+            {'code': 'COUNCIL', 'label': 'Council endorsement', 'required_right': '170003',
+             'assigned_role': 'TASAF Council Coordinator'},
+            {'code': 'DP', 'label': 'Director of Programs approval', 'required_right': '170003',
+             'assigned_role': 'TASAF Director of Programs'},
         ],
     },
 ]
@@ -125,9 +145,23 @@ def _seed_admin_rights(apps):
             RoleRight.objects.create(role=role, right_id=right_id, audit_user_id=1)
 
 
-def _flow_config(flow):
-    """The stored ApprovalFlow.config from a DEFAULT_FLOWS entry (steps + flow-level flags)."""
-    cfg = {'steps': flow['steps']}
+def _flow_config(flow, role_by_name=None):
+    """The stored ApprovalFlow.config from a DEFAULT_FLOWS entry (steps + flow-level flags).
+
+    A step may carry ``assigned_role`` (a role NAME) for portability across environments; it is
+    resolved to ``assigned_role_id`` at seed time via ``role_by_name`` (DB role ids differ per
+    environment, so names — not ids — live in code). Unresolvable names are dropped rather than
+    stored, so the flow still works (routing is optional; authorization is the step's required_right).
+    """
+    role_by_name = role_by_name or {}
+    steps = []
+    for step in flow['steps']:
+        resolved = {k: v for k, v in step.items() if k != 'assigned_role'}
+        role_name = step.get('assigned_role')
+        if role_name and role_by_name.get(role_name) is not None:
+            resolved['assigned_role_id'] = role_by_name[role_name]
+        steps.append(resolved)
+    cfg = {'steps': steps}
     if flow.get('enforce_distinct_approvers'):
         cfg['enforce_distinct_approvers'] = True
     return cfg
@@ -137,12 +171,18 @@ def _seed_flows(apps):
     """Upsert the code-defined flows. Flows are code-managed config: on an existing flow the
     name/domain/config are refreshed from DEFAULT_FLOWS so rights/step changes propagate."""
     ApprovalFlow = apps.get_model('approval', 'ApprovalFlow')
+    Role = apps.get_model('core', 'Role')
     User = apps.get_model('core', 'User')
     admin = User.objects.order_by('id').first()
     if not admin:
         return
+    # Resolve assigned_role names → ids once (later/higher id wins on duplicate names).
+    role_by_name = {
+        r.name: r.id
+        for r in Role.objects.filter(validity_to__isnull=True).order_by('id')
+    }
     for flow in DEFAULT_FLOWS:
-        cfg = _flow_config(flow)
+        cfg = _flow_config(flow, role_by_name)
         existing = ApprovalFlow.objects.filter(code=flow['code']).first()
         if existing:
             if getattr(existing, 'is_user_managed', False):
