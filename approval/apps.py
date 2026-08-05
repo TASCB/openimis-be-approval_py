@@ -6,7 +6,7 @@ Loads rights + behaviour from ``core.ModuleConfiguration`` and performs idempote
 
 The engine's rights (``24xxxx``) cover only its OWN operations (flow admin, request view, cancel /
 return / override). A step's decision authorization uses that step's ``required_right``, which is a
-DOMAIN right (e.g. ``230201`` access_request manager, ``152102`` payment approve) — never a 24xxxx
+DOMAIN right (e.g. ``230201`` access_request manager, ``270102`` payment approve) — never a 24xxxx
 right.
 """
 import logging
@@ -33,15 +33,15 @@ DEFAULT_FLOWS = [
     {
         'code': 'PAYMENT_APPROVAL', 'name': 'Payment / paylist approval',
         'domain': 'tasaf_payment.Paylist',
-        # Two-level sign-off. Both steps require the paylist-approve right (152303); the engine's
+        # Two-level sign-off. Both steps require the paylist-approve right (270303); the engine's
         # enforce_distinct_approvers guarantees the two signatures come from DIFFERENT people
         # (segregation of duties) without needing two separate rights.
         'enforce_distinct_approvers': True,
         'steps': [
-            {'code': 'FINANCE_DIRECTOR', 'label': 'Director of Finance', 'required_right': '152303',
-             'assigned_role': 'TASAF Payment Approver'},
-            {'code': 'EXECUTIVE_DIRECTOR', 'label': 'Executive Director', 'required_right': '152303',
-             'assigned_role': 'TASAF Payment Approver'},
+            {'code': 'FINANCE_DIRECTOR', 'label': 'Director of Finance', 'required_right': '270303',
+             'assigned_role': 'Payment Approver'},
+            {'code': 'EXECUTIVE_DIRECTOR', 'label': 'Executive Director', 'required_right': '270303',
+             'assigned_role': 'Payment Approver'},
         ],
     },
     {
@@ -49,7 +49,7 @@ DEFAULT_FLOWS = [
         'domain': 'training.Training',
         'steps': [
             {'code': 'SUPERVISOR', 'label': 'Supervisor', 'required_right': '210110',
-             'assigned_role': 'TASAF PCT Manager'},
+             'assigned_role': 'PCT Manager'},
         ],
     },
     {
@@ -64,9 +64,9 @@ DEFAULT_FLOWS = [
         'enforce_distinct_approvers': True,
         'steps': [
             {'code': 'COUNCIL', 'label': 'Council endorsement', 'required_right': '170003',
-             'assigned_role': 'TASAF Council Coordinator'},
+             'assigned_role': 'Council Coordinator'},
             {'code': 'DP', 'label': 'Director of Programs approval', 'required_right': '170003',
-             'assigned_role': 'TASAF Director of Programs'},
+             'assigned_role': 'Director of Programs'},
         ],
     },
 ]
