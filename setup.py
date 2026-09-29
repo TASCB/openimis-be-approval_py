@@ -15,9 +15,9 @@ setup(
     description='The openIMIS Backend generic Approval Engine module (TASAF / CoreMIS).',
     long_description=README,
     long_description_content_type='text/markdown',
-    url='https://openimis.org/',
-    author='TASAF / CoreMIS',
-    author_email='',
+    url='https://tascb.org/',
+    author='Japheth Haran M',
+    author_email='japhet.mgavilenzi@tasaf.go.tz',
     install_requires=[
         'django',
         'django-db-signals',
