@@ -93,8 +93,12 @@ class ApprovalService:
 
     # ---- request lifecycle -------------------------------------------------
     @register_service_signal('approval_service.request_approval')
-    def request_approval(self, entity, flow_code, summary=None):
-        """Create an ApprovalRequest for ``entity`` from the flow ``flow_code`` and its steps."""
+    def request_approval(self, entity, flow_code, summary=None, step_roles=None):
+        """Create an ApprovalRequest for ``entity`` from the flow ``flow_code`` and its steps.
+
+        ``step_roles`` maps a step code to a core.Role id, overriding the flow's
+        ``assigned_role`` for this request only.
+        """
         try:
             with transaction.atomic():
                 flow = ApprovalFlow.objects.filter(
@@ -113,12 +117,14 @@ class ApprovalService:
                     summary=summary or {})
                 req.save(username=self.user.username)
 
+                overrides = step_roles or {}
                 for i, s in enumerate(steps_cfg, start=1):
+                    code = s.get('code') or f'STEP_{i}'
                     ApprovalStep(
-                        approval_request=req, order=i, code=s.get('code') or f'STEP_{i}',
+                        approval_request=req, order=i, code=code,
                         label=s.get('label'), status=StepStatus.PENDING,
                         required_right=str(s['required_right']) if s.get('required_right') else None,
-                        assigned_role_id=s.get('assigned_role_id'),
+                        assigned_role_id=overrides.get(code) or s.get('assigned_role_id'),
                     ).save(username=self.user.username)
 
                 self.sync_task_for_current_step(req)
@@ -183,9 +189,21 @@ class ApprovalService:
                     return _fail(_("approval.not_current_step"), str(step.order))
 
                 rr = step.required_right
-                if rr and not (self.user.has_perms([rr])
-                               or self.user.has_perms(ApprovalConfig.gql_override_perms)):
+                override = self.user.has_perms(ApprovalConfig.gql_override_perms)
+                if rr and not (self.user.has_perms([rr]) or override):
                     return _fail(_("approval.unauthorized"))
+
+                # enforce_assigned_role: an assigned step is that role's to sign, not any right holder's.
+                if (step.assigned_role_id and not override
+                        and (req.flow.config or {}).get('enforce_assigned_role')):
+                    me = self._user_obj()
+                    if not (me and self._holds_role(me, step.assigned_role_id)):
+                        return _fail(_("approval.unauthorized"))
+
+                if (decision == DecisionType.APPROVED
+                        and (req.flow.config or {}).get('enforce_requester_not_approver')
+                        and req.requested_by_id and req.requested_by_id == getattr(self._user_obj(), 'id', None)):
+                    return _fail(_("approval.requester_cannot_approve"))
 
                 # Segregation of duties: on a flow that requires distinct approvers, the same person
                 # may not sign more than one step of the same request.
@@ -253,11 +271,21 @@ class ApprovalService:
         return out
 
     # ---- tasks_management inbox integration -------------------------------
+    @staticmethod
+    def _holds_role(user, role_id):
+        """Does this core.User hold ``role_id``?"""
+        from core.models import UserRole
+        i_user_id = getattr(user, 'i_user_id', None)
+        if not i_user_id:
+            return False
+        return UserRole.objects.filter(
+            user_id=i_user_id, role_id=role_id, validity_to__isnull=True).exists()
+
     def resolve_step_approvers(self, step):
-        """core.User ids whose roles grant ``step.required_right``.
+        """core.User ids who may act on ``step``: holders of ``required_right``, narrowed to
+        ``assigned_role`` when the step carries one.
 
         Path: ``RoleRight(right_id) -> Role -> UserRole.user (InteractiveUser) -> core.User.i_user``.
-        Authorization still uses ``has_perms``; this only decides whose inbox the step lands in.
         """
         if not step or not step.required_right:
             return []
@@ -270,6 +298,11 @@ class ApprovalService:
             right_id=right, validity_to__isnull=True).values_list('role_id', flat=True).distinct())
         if not role_ids:
             return []
+        flow_cfg = getattr(getattr(step.approval_request, 'flow', None), 'config', None) or {}
+        if step.assigned_role_id and flow_cfg.get('enforce_assigned_role'):
+            role_ids = [r for r in role_ids if r == step.assigned_role_id]
+            if not role_ids:
+                return []
         i_user_ids = list(UserRole.objects.filter(
             role_id__in=role_ids, validity_to__isnull=True).values_list('user_id', flat=True).distinct())
         if not i_user_ids:

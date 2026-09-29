@@ -25,6 +25,8 @@ DEFAULT_FLOWS = [
     {
         'code': 'ACCESS_REQUEST_ACCOUNT', 'name': 'Access request — account provisioning',
         'domain': 'access_request.AccessRequest',
+        # MANAGER is routed to the applicant's section sponsor; without a sponsor it is right-only.
+        'enforce_assigned_role': True,
         'steps': [
             {'code': 'MANAGER', 'label': 'Department / Line Manager', 'required_right': '230201'},
             {'code': 'ICT', 'label': 'ICT Department', 'required_right': '230202'},
@@ -45,11 +47,30 @@ DEFAULT_FLOWS = [
         ],
     },
     {
+        'code': 'MUSE_SETTINGS_CHANGE', 'name': 'MUSE settings / FSP routing change',
+        'domain': 'tasaf_payment.MuseChangeRequest',
+        'enforce_requester_not_approver': True,
+        'steps': [
+            {'code': 'MUSE_CHECKER', 'label': 'Payment settings approver', 'required_right': '270903',
+             'assigned_role': 'Payment Approver'},
+        ],
+    },
+    {
         'code': 'TRAINING_APPROVAL', 'name': 'Training approval',
         'domain': 'training.Training',
         'steps': [
             {'code': 'SUPERVISOR', 'label': 'Supervisor', 'required_right': '210110',
              'assigned_role': 'PCT Manager'},
+        ],
+    },
+    {
+        # A material payment-detail change needs a second person before the account is re-verified.
+        'code': 'CASE_PAYMENT_CHANGE', 'name': 'Case management — payment detail change',
+        'domain': 'tasaf_payment.PaymentAccount',
+        'enforce_distinct_approvers': True,
+        'steps': [
+            {'code': 'CASE_APPROVER', 'label': 'Payment change approver',
+             'required_right': '290502', 'assigned_role': 'Payment Approver'},
         ],
     },
     {
@@ -164,6 +185,8 @@ def _flow_config(flow, role_by_name=None):
     cfg = {'steps': steps}
     if flow.get('enforce_distinct_approvers'):
         cfg['enforce_distinct_approvers'] = True
+    if flow.get('enforce_requester_not_approver'):
+        cfg['enforce_requester_not_approver'] = True
     return cfg
 
 
