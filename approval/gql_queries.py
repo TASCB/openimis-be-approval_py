@@ -45,6 +45,7 @@ class ApprovalDecisionGQLType(DjangoObjectType):
 class ApprovalStepGQLType(DjangoObjectType):
     uuid = graphene.String(source='uuid')
     decisions = graphene.List(ApprovalDecisionGQLType)
+    assigned_group_name = graphene.String()
 
     class Meta:
         model = ApprovalStep
@@ -62,6 +63,12 @@ class ApprovalStepGQLType(DjangoObjectType):
 
     def resolve_decisions(self, info):
         return self.decisions.filter(is_deleted=False).order_by('date_created')
+
+    def resolve_assigned_group_name(self, info):
+        if not self.assigned_group_id:
+            return None
+        from django.contrib.auth.models import Group
+        return Group.objects.filter(id=self.assigned_group_id).values_list('name', flat=True).first()
 
 
 class ApprovalRequestGQLType(DjangoObjectType):

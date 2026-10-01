@@ -102,6 +102,8 @@ class ApprovalStep(HistoryModel):
         max_length=30, choices=StepStatus.choices, default=StepStatus.PENDING)
     required_right = models.CharField(max_length=10, blank=True, null=True)
     assigned_role_id = models.IntegerField(blank=True, null=True)
+    # auth.Group id; when set, only members of that user group may sign the step.
+    assigned_group_id = models.IntegerField(blank=True, null=True)
     task_id = models.UUIDField(blank=True, null=True)
 
     class Meta:

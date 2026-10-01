@@ -93,11 +93,12 @@ class ApprovalService:
 
     # ---- request lifecycle -------------------------------------------------
     @register_service_signal('approval_service.request_approval')
-    def request_approval(self, entity, flow_code, summary=None, step_roles=None):
+    def request_approval(self, entity, flow_code, summary=None, step_roles=None, step_groups=None):
         """Create an ApprovalRequest for ``entity`` from the flow ``flow_code`` and its steps.
 
         ``step_roles`` maps a step code to a core.Role id, overriding the flow's
-        ``assigned_role`` for this request only.
+        ``assigned_role`` for this request only. ``step_groups`` maps a step code to an
+        auth.Group id whose members alone may sign that step.
         """
         try:
             with transaction.atomic():
@@ -118,6 +119,7 @@ class ApprovalService:
                 req.save(username=self.user.username)
 
                 overrides = step_roles or {}
+                groups = step_groups or {}
                 for i, s in enumerate(steps_cfg, start=1):
                     code = s.get('code') or f'STEP_{i}'
                     ApprovalStep(
@@ -125,6 +127,7 @@ class ApprovalService:
                         label=s.get('label'), status=StepStatus.PENDING,
                         required_right=str(s['required_right']) if s.get('required_right') else None,
                         assigned_role_id=overrides.get(code) or s.get('assigned_role_id'),
+                        assigned_group_id=groups.get(code),
                     ).save(username=self.user.username)
 
                 self.sync_task_for_current_step(req)
@@ -200,6 +203,11 @@ class ApprovalService:
                     if not (me and self._holds_role(me, step.assigned_role_id)):
                         return _fail(_("approval.unauthorized"))
 
+                if step.assigned_group_id and not override:
+                    me = self._user_obj()
+                    if not (me and self._in_group(me, step.assigned_group_id)):
+                        return _fail(_("approval.unauthorized"))
+
                 if (decision == DecisionType.APPROVED
                         and (req.flow.config or {}).get('enforce_requester_not_approver')
                         and req.requested_by_id and req.requested_by_id == getattr(self._user_obj(), 'id', None)):
@@ -266,8 +274,11 @@ class ApprovalService:
             step = req.steps.filter(order=req.current_step_order, is_deleted=False).first()
             if not step:
                 continue
-            if not step.required_right or user.has_perms([step.required_right]):
-                out.append(req)
+            if step.required_right and not user.has_perms([step.required_right]):
+                continue
+            if step.assigned_group_id and not self._in_group(user, step.assigned_group_id):
+                continue
+            out.append(req)
         return out
 
     # ---- tasks_management inbox integration -------------------------------
@@ -280,6 +291,10 @@ class ApprovalService:
             return False
         return UserRole.objects.filter(
             user_id=i_user_id, role_id=role_id, validity_to__isnull=True).exists()
+
+    @staticmethod
+    def _in_group(user, group_id):
+        return bool(getattr(user, 'id', None)) and user.groups.filter(id=group_id).exists()
 
     def resolve_step_approvers(self, step):
         """core.User ids who may act on ``step``: holders of ``required_right``, narrowed to
@@ -307,8 +322,10 @@ class ApprovalService:
             role_id__in=role_ids, validity_to__isnull=True).values_list('user_id', flat=True).distinct())
         if not i_user_ids:
             return []
-        return list(User.objects.filter(
-            i_user_id__in=i_user_ids, validity_to__isnull=True).values_list('id', flat=True))
+        users = User.objects.filter(i_user_id__in=i_user_ids, validity_to__isnull=True)
+        if step.assigned_group_id:
+            users = users.filter(groups__id=step.assigned_group_id)
+        return list(users.values_list('id', flat=True))
 
     def sync_task_for_current_step(self, approval_request):
         """Best-effort ``tasks_management`` inbox Task for the current step.
