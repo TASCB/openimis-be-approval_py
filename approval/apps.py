@@ -37,8 +37,9 @@ DEFAULT_FLOWS = [
         'domain': 'tasaf_payment.Paylist',
         # Two-level sign-off. Both steps require the paylist-approve right (270303); the engine's
         # enforce_distinct_approvers guarantees the two signatures come from DIFFERENT people
-        # (segregation of duties) without needing two separate rights.
+        # (segregation of duties) without needing two separate rights; whoever generated it signs neither.
         'enforce_distinct_approvers': True,
+        'enforce_requester_not_approver': True,
         'steps': [
             {'code': 'FINANCE_DIRECTOR', 'label': 'Director of Finance', 'required_right': '270303',
              'assigned_role': 'Payment Approver'},
